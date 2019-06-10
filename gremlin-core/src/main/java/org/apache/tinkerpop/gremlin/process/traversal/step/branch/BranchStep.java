@@ -38,18 +38,23 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 /**
  * @author Marko A. Rodriguez (http://markorodriguez.com)
+ * @author Daniel Kuppitz (http://gremlin.guru)
  */
 public class BranchStep<S, E, M> extends ComputerAwareStep<S, E> implements TraversalOptionParent<M, S, E> {
 
     protected Traversal.Admin<S, M> branchTraversal;
     protected Map<Object, List<Traversal.Admin<S, E>>> traversalOptions = new HashMap<>();
+
     private boolean first = true;
-    private boolean hasBarrier = false;
+    private boolean hasBarrier;
+    private boolean hasPredicateOptions;
 
     public BranchStep(final Traversal.Admin traversal) {
         super(traversal);
@@ -61,7 +66,8 @@ public class BranchStep<S, E, M> extends ComputerAwareStep<S, E> implements Trav
 
     @Override
     public void addGlobalChildOption(final M pickToken, final Traversal.Admin<S, E> traversalOption) {
-        final Object pickTokenKey = PickTokenKey.make(pickToken);
+        final Object pickTokenKey = makePickTokenKey(pickToken);
+        this.hasPredicateOptions |= pickTokenKey instanceof PredicateOption;
         if (this.traversalOptions.containsKey(pickTokenKey))
             this.traversalOptions.get(pickTokenKey).add(traversalOption);
         else
@@ -138,14 +144,13 @@ public class BranchStep<S, E, M> extends ComputerAwareStep<S, E> implements Trav
     private void applyCurrentTraverser(final Traverser.Admin<S> start) {
         // first get the value of the choice based on the current traverser and use that to select the right traversal
         // option to which that traverser should be routed
-        final Object choice = PickTokenKey.make(TraversalUtil.apply(start, this.branchTraversal));
-        final List<Traversal.Admin<S, E>> branch = this.traversalOptions.containsKey(choice) ?
-                this.traversalOptions.get(choice) : this.traversalOptions.get(Pick.none);
+        final Object choice = makePickTokenKey(TraversalUtil.apply(start, this.branchTraversal));
+        final List<Traversal.Admin<S, E>> branches = pickBranches(choice);
 
         // if a branch is identified, then split the traverser and add it to the start of the option so that when
         // that option is iterated (in the calling method) that value can be applied.
-        if (null != branch)
-            branch.forEach(traversal -> traversal.addStart(start.split()));
+        if (null != branches)
+            branches.forEach(traversal -> traversal.addStart(start.split()));
 
         if (choice != Pick.any) {
             final List<Traversal.Admin<S, E>> anyBranch = this.traversalOptions.get(Pick.any);
@@ -158,10 +163,10 @@ public class BranchStep<S, E, M> extends ComputerAwareStep<S, E> implements Trav
     protected Iterator<Traverser.Admin<E>> computerAlgorithm() {
         final List<Traverser.Admin<E>> ends = new ArrayList<>();
         final Traverser.Admin<S> start = this.starts.next();
-        final Object choice = PickTokenKey.make(TraversalUtil.apply(start, this.branchTraversal));
-        final List<Traversal.Admin<S, E>> branch = this.traversalOptions.containsKey(choice) ? this.traversalOptions.get(choice) : this.traversalOptions.get(Pick.none);
-        if (null != branch) {
-            branch.forEach(traversal -> {
+        final Object choice = makePickTokenKey(TraversalUtil.apply(start, this.branchTraversal));
+        final List<Traversal.Admin<S, E>> branches = pickBranches(choice);
+        if (null != branches) {
+            branches.forEach(traversal -> {
                 final Traverser.Admin<E> split = (Traverser.Admin<E>) start.split();
                 split.setStepId(traversal.getStartStep().getId());
                 //split.addLabels(this.labels);
@@ -180,6 +185,22 @@ public class BranchStep<S, E, M> extends ComputerAwareStep<S, E> implements Trav
             }
         }
         return ends.iterator();
+    }
+
+    private List<Traversal.Admin<S, E>> pickBranches(final Object choice) {
+        final List<Traversal.Admin<S, E>> branches = new ArrayList<>();
+        if (this.hasPredicateOptions) {
+            for (final Map.Entry<Object, List<Traversal.Admin<S, E>>> e : this.traversalOptions.entrySet()) {
+                if (Objects.equals(e.getKey(), choice)) {
+                    branches.addAll(e.getValue());
+                }
+            }
+        } else {
+            if (this.traversalOptions.containsKey(choice)) {
+                branches.addAll(this.traversalOptions.get(choice));
+            }
+        }
+        return branches.isEmpty() ? this.traversalOptions.get(Pick.none) : branches;
     }
 
     @Override
@@ -230,26 +251,30 @@ public class BranchStep<S, E, M> extends ComputerAwareStep<S, E> implements Trav
     }
 
     /**
-     * PickTokenKey is basically a wrapper for numbers that are used as a PickToken. This is
-     * required in order to treat equal numbers of different data types as a match.
+     * Converts numbers into {@link NumberOption} and predicates into {@link PredicateOption}.
      */
-    private static class PickTokenKey {
+    private static Object makePickTokenKey(final Object o) {
+        return
+                o instanceof Number ? new NumberOption((Number) o) :
+                o instanceof Predicate ? new PredicateOption((Predicate) o) : o;
+    }
+
+    /**
+     * Wraps a single number and overrides equals/hashCode/compareTo in order to ignore the numeric data type.
+     */
+    private static class NumberOption implements Comparable<Number> {
 
         final Number number;
 
-        private PickTokenKey(final Number number) {
+        NumberOption(final Number number) {
             this.number = number;
-        }
-
-        static Object make(final Object value) {
-            return value instanceof Number ? new PickTokenKey((Number) value) : value;
         }
 
         @Override
         public boolean equals(final Object o) {
             if (this == o) return true;
             if (o == null || getClass() != o.getClass()) return false;
-            final PickTokenKey other = (PickTokenKey) o;
+            final NumberOption other = (NumberOption) o;
             return 0 == NumberHelper.compare(number, other.number);
         }
 
@@ -261,6 +286,41 @@ public class BranchStep<S, E, M> extends ComputerAwareStep<S, E> implements Trav
         @Override
         public String toString() {
             return number.toString();
+        }
+
+        @Override
+        public int compareTo(final Number other) {
+            return NumberHelper.compare(this.number, other);
+        }
+    }
+
+    /**
+     * Wraps a single predicate and overrides equals/hashCode so that the predicate can be matched against a concrete value.
+     */
+    private static class PredicateOption {
+
+        final Predicate predicate;
+
+        PredicateOption(final Predicate predicate) {
+            this.predicate = predicate;
+        }
+
+        @SuppressWarnings({"EqualsWhichDoesntCheckParameterClass", "unchecked"})
+        @Override
+        public boolean equals(final Object o) {
+            if (o instanceof PredicateOption)
+                return ((PredicateOption) o).predicate.equals(predicate);
+            return predicate.test(o);
+        }
+
+        @Override
+        public int hashCode() {
+            return 0;
+        }
+
+        @Override
+        public String toString() {
+            return predicate.toString();
         }
     }
 }

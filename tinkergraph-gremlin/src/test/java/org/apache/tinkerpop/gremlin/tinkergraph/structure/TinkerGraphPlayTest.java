@@ -27,6 +27,7 @@ import org.apache.tinkerpop.gremlin.process.traversal.Traverser;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversalSource;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.__;
+import org.apache.tinkerpop.gremlin.process.traversal.step.TraversalOptionParent;
 import org.apache.tinkerpop.gremlin.process.traversal.strategy.optimization.EarlyLimitStrategy;
 import org.apache.tinkerpop.gremlin.process.traversal.strategy.optimization.PathRetractionStrategy;
 import org.apache.tinkerpop.gremlin.structure.*;
@@ -45,6 +46,10 @@ import java.util.function.BiFunction;
 import java.util.function.Supplier;
 
 import static org.apache.tinkerpop.gremlin.process.traversal.Operator.sum;
+import static org.apache.tinkerpop.gremlin.process.traversal.P.between;
+import static org.apache.tinkerpop.gremlin.process.traversal.P.gt;
+import static org.apache.tinkerpop.gremlin.process.traversal.P.gte;
+import static org.apache.tinkerpop.gremlin.process.traversal.P.lt;
 import static org.apache.tinkerpop.gremlin.process.traversal.P.neq;
 import static org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.__.*;
 
@@ -124,12 +129,17 @@ public class TinkerGraphPlayTest {
     @Ignore
     public void testPlayDK() throws Exception {
 
-        final GraphTraversalSource g = TinkerFactory.createModern().traversal();
-        g.V().match(
-                __.as("b").out("created").as("c"),
-                __.as("a").hasLabel("person"),
-                __.as("b").hasLabel("person"),
-                __.as("a").out("knows").as("b")).forEachRemaining(System.out::println);
+        GraphTraversalSource g = TinkerFactory.createModern().traversal();
+        g./*withComputer().*/V().hasLabel("person")
+                .project("name", "age", "comments")
+                    .by("name")
+                    .by("age")
+                    .by(branch(values("age"))
+                            .option(29, constant("almost old"))
+                            .option(lt(29), constant("pretty young"))
+                            .option(lt(35), constant("younger than peter"))
+                            .option(gte(30), constant("pretty old")).fold())
+                .forEachRemaining(System.out::println);
     }
 
     @Test
