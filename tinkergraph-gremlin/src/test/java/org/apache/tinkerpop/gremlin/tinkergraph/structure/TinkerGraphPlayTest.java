@@ -130,16 +130,18 @@ public class TinkerGraphPlayTest {
     public void testPlayDK() throws Exception {
 
         GraphTraversalSource g = TinkerFactory.createModern().traversal();
-        g./*withComputer().*/V().hasLabel("person")
+        System.out.println(g./*withComputer().*/V().hasLabel("person")
                 .project("name", "age", "comments")
                     .by("name")
                     .by("age")
                     .by(branch(values("age"))
+                            .option(TraversalOptionParent.Pick.any, constant("foo"))
                             .option(29, constant("almost old"))
+                            .option(__.is(32), constant("looks like josh"))
                             .option(lt(29), constant("pretty young"))
                             .option(lt(35), constant("younger than peter"))
-                            .option(gte(30), constant("pretty old")).fold())
-                .forEachRemaining(System.out::println);
+                            .option(gte(30), constant("pretty old")).fold()).explain());
+                //.forEachRemaining(System.out::println);
     }
 
     @Test

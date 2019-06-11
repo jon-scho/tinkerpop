@@ -252,9 +252,10 @@ public abstract class ComplexTest extends AbstractGremlinProcessTest {
         assertTrue(map.get("vadas").contains("pretty young"));
         assertTrue(map.get("vadas").contains("younger than peter"));
         assertTrue(map.containsKey("josh"));
-        assertEquals(2, map.get("josh").size());
+        assertEquals(3, map.get("josh").size());
         assertTrue(map.get("josh").contains("younger than peter"));
         assertTrue(map.get("josh").contains("pretty old"));
+        assertTrue(map.get("josh").contains("looks like josh"));
         assertTrue(map.containsKey("peter"));
         assertEquals(1, map.get("peter").size());
         assertTrue(map.get("peter").contains("pretty old"));
@@ -348,6 +349,7 @@ public abstract class ComplexTest extends AbstractGremlinProcessTest {
                         .by("name")
                         .by(branch(__.values("age"))
                                 .option(29, constant("almost old"))
+                                .option(__.is(32), constant("looks like josh"))
                                 .option(lt(29), constant("pretty young"))
                                 .option(lt(35), constant("younger than peter"))
                                 .option(gte(30), constant("pretty old")).fold());
